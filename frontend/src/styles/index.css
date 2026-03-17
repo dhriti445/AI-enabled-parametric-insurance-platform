@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --surface: #f6fbfb;
+}
+
+body {
+  margin: 0;
+  font-family: 'Manrope', sans-serif;
+  background: radial-gradient(circle at 12% 15%, #e6f5f3 0%, #f6fbfb 40%, #fffaf3 100%);
+}
+
+.bg-surface {
+  background-color: var(--surface);
+}
+
+.input {
+  @apply w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100;
+}
+
+.btn-primary {
+  @apply rounded-xl bg-brand-700 px-5 py-2.5 font-semibold text-white transition hover:bg-brand-900;
+}
+
+.btn-secondary {
+  @apply rounded-xl border border-slate-300 bg-white px-4 py-2 font-semibold text-slate-700 transition hover:bg-slate-50;
+}
