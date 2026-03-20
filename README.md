@@ -1,13 +1,14 @@
 # README.md
 
 ## Executive Summary
-The AI-Enabled Parametric Insurance Platform aims to revolutionize the insurance industry by leveraging artificial intelligence to provide automated and flexible insurance solutions. By capturing real-time data and utilizing predictive analytics, the platform offers tailored parametric insurance products that adjust to the dynamic needs of clients. This innovation seeks to streamline the claims process, reduce operational costs, and enhance customer satisfaction.
+The AI-Enabled Parametric Insurance Platform aims to revolutionize the insurance industry by leveraging artificial intelligence to provide automated and flexible insurance solutions. By capturing real-time data and utilizing predictive analytics, the platform offers tailored parametric insurance products that adjust to the dynamic needs of delivery partners. This innovation seeks to streamline the claims process, reduce operational costs, and enhance customer satisfaction.
 
 ## Problem Statement
-Traditional insurance models are often inefficient, leading to complicated claims processes and delayed settlements. Furthermore, standard coverage does not cater to specific individual risks, leaving gaps in protection. Policyholders frequently face a frustrating experience when navigating through claims, often waiting for extended periods for resolutions, making traditional insurance less appealing.
+India’s platform-based delivery partners (Zomato, Swiggy, Zepto, Amazon, Dunzo etc.) are the backbone of our fast-paced digital economy. However, external disruptions such as extreme weather, pollution, and natural disasters can reduce their working hours and cause them to lose 20–30% of their monthly earnings. Currently, gig workers have no income protection against these uncontrollable events. When disruptions occur, they bear the full financial loss with no safety net.
+Traditional insurance models are often inefficient, leading to complicated claims processes and delayed settlements. Furthermore, standard coverage does not cater to specific individual risks of delivery partners, leaving gaps in protection. Policyholders frequently face a frustrating experience when navigating through claims, often waiting for extended periods for resolutions, making traditional insurance less appealing.
 
 ## Solution
-Our platform offers a unique and data-driven approach to insurance through parametric solutions. By establishing predefined triggers based on environmental data, users can receive instant payouts without the lengthy verification processes characteristic of conventional insurance claims. This transparency and speed provide users with peace of mind and greater financial security.
+Our platform offers a unique and data-driven approach to insurance through parametric solutions. By establishing predefined triggers based on environmental data, workers can receive instant payouts without the lengthy verification processes characteristic of conventional insurance claims. This transparency and speed provide workers with peace of mind and greater financial security.
 
 ## Features
 1. **Real-Time Data Integration**: Incorporation of live data feeds from credible sources allows the platform to initiate claims automatically when predefined triggers are met.
