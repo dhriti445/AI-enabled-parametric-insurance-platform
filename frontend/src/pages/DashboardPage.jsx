@@ -42,15 +42,14 @@ export default function DashboardPage() {
   }, []);
 
   const triggerMockEvent = async () => {
-    setMessage('Checking disruption APIs...');
-    await api.post('/triggers/monitor', {
-      location: 'Mumbai',
-      rainfall_mm: 75,
-      aqi: 210,
-      temperature_c: 35,
-      curfew_alert: false,
-    });
-    setMessage('Heavy rain detected -> payout triggered for eligible workers.');
+    const location = (dashboard?.user?.location || 'mumbai').toLowerCase();
+    setMessage(`Checking automated disruption signals for ${location}...`);
+    const { data } = await api.post(`/triggers/monitor/auto/${location}`);
+    if (data.triggered) {
+      setMessage(`${data.reason} detected via ${data.source}. Auto-claims created for eligible workers.`);
+    } else {
+      setMessage(`No severe disruption detected for ${location}. Source: ${data.source}.`);
+    }
     await loadData();
   };
 
@@ -88,7 +87,7 @@ export default function DashboardPage() {
         <Card>
           <div className="flex items-center justify-between">
             <p className="font-heading text-lg font-bold text-brand-900">Protection Trend</p>
-            <button className="btn-secondary" onClick={triggerMockEvent}>Simulate Disruption</button>
+            <button className="btn-secondary" onClick={triggerMockEvent}>Run Auto Trigger Check</button>
           </div>
           <div className="mt-4 h-64">
             <ResponsiveContainer width="100%" height="100%">

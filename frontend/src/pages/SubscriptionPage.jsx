@@ -64,15 +64,18 @@ export default function SubscriptionPage() {
 
       <div className="grid gap-4 md:grid-cols-3">
         {planRows.map(([name, plan]) => (
-          <Card
+          <div
             key={name}
-            className={`cursor-pointer transition hover:-translate-y-1 ${selectedPlan === name ? 'ring-2 ring-brand-500' : ''}`}
+            className={`cursor-pointer rounded-2xl border border-white/70 bg-white p-5 shadow-soft transition hover:-translate-y-1 ${selectedPlan === name ? 'ring-2 ring-brand-500' : ''}`}
             onClick={() => setSelectedPlan(name)}
+            role="button"
+            tabIndex="0"
+            onKeyDown={(e) => e.key === 'Enter' && setSelectedPlan(name)}
           >
             <p className="font-heading text-lg font-bold text-brand-900">{name} Plan</p>
             <p className="mt-2 text-2xl font-extrabold text-slate-900">Rs.{plan.weekly_price}<span className="text-sm font-medium text-slate-500">/week</span></p>
             <p className="mt-2 text-sm text-slate-700">Coverage up to Rs.{plan.weekly_coverage}</p>
-          </Card>
+          </div>
         ))}
       </div>
 
