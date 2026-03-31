@@ -19,6 +19,7 @@ class AuthResponse(BaseModel):
     user_id: int
     name: str
     role: str
+    location: str
     risk_score: float
     risk_tier: str
 

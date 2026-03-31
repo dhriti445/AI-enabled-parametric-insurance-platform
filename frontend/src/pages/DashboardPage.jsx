@@ -11,7 +11,7 @@ export default function DashboardPage() {
   const [dashboard, setDashboard] = useState(null);
   const [claims, setClaims] = useState([]);
   const [goalInput, setGoalInput] = useState('25000');
-  const [manualClaim, setManualClaim] = useState({ estimated_income_loss: 500, image_filename: 'flood-proof.jpg' });
+  const [manualClaim, setManualClaim] = useState({ estimated_income_loss: 500, proof_file: null });
   const [message, setMessage] = useState('');
 
   const loadData = async () => {
@@ -63,13 +63,26 @@ export default function DashboardPage() {
   };
 
   const submitManualClaim = async () => {
-    const { data } = await api.post('/claims/manual', {
-      user_id: user.user_id,
-      estimated_income_loss: Number(manualClaim.estimated_income_loss),
-      image_filename: manualClaim.image_filename,
-    });
-    setMessage(`Manual claim ${data.claim_status}.`);
-    await loadData();
+    if (!manualClaim.proof_file) {
+      setMessage('Please upload a proof file (image or video).');
+      return;
+    }
+    
+    const formData = new FormData();
+    formData.append('user_id', user.user_id);
+    formData.append('estimated_income_loss', Number(manualClaim.estimated_income_loss));
+    formData.append('proof_file', manualClaim.proof_file);
+
+    try {
+      const { data } = await api.post('/claims/manual', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setMessage(`Manual claim ${data.claim_status}.`);
+      setManualClaim({ estimated_income_loss: 500, proof_file: null });
+      await loadData();
+    } catch (err) {
+      setMessage(`Error: ${err.response?.data?.detail || 'Claim submission failed'}`);
+    }
   };
 
   if (!dashboard) return <Layout title="Worker Dashboard" subtitle="Loading insights..." />;
@@ -123,18 +136,46 @@ export default function DashboardPage() {
         <Card>
           <p className="font-heading text-lg font-bold text-brand-900">Manual Claim + AI Image Verification</p>
           <div className="mt-3 grid gap-3">
-            <input
-              className="input"
-              type="number"
-              value={manualClaim.estimated_income_loss}
-              onChange={(e) => setManualClaim({ ...manualClaim, estimated_income_loss: e.target.value })}
-            />
-            <input
-              className="input"
-              value={manualClaim.image_filename}
-              onChange={(e) => setManualClaim({ ...manualClaim, image_filename: e.target.value })}
-              placeholder="proof image filename"
-            />
+            <div>
+              <label className="text-xs font-semibold text-slate-600">Loss Amount (Rs.)</label>
+              <input
+                className="input mt-1"
+                type="number"
+                value={manualClaim.estimated_income_loss}
+                onChange={(e) => setManualClaim({ ...manualClaim, estimated_income_loss: e.target.value })}
+                placeholder="e.g., 500"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-600">Proof (JPG, PNG, or MP4)</label>
+              <div className="mt-1 rounded-lg border-2 border-dashed border-slate-300 px-4 py-6 text-center transition hover:border-brand-400">
+                <input
+                  type="file"
+                  accept=".jpg,.jpeg,.png,.mp4"
+                  onChange={(e) => {
+                    if (e.target.files?.[0]) {
+                      setManualClaim({ ...manualClaim, proof_file: e.target.files[0] });
+                    }
+                  }}
+                  className="hidden"
+                  id="proof-upload"
+                />
+                <label htmlFor="proof-upload" className="cursor-pointer">
+                  <p className="text-sm font-semibold text-slate-700">
+                    {manualClaim.proof_file ? (
+                      <>
+                        ✓ {manualClaim.proof_file.name}
+                        <br />
+                        <span className="text-xs text-slate-500">({(manualClaim.proof_file.size / 1024).toFixed(1)} KB)</span>
+                      </>
+                    ) : (
+                      <>Click to upload</>
+                    )}
+                  </p>
+                  {!manualClaim.proof_file && <p className="mt-1 text-xs text-slate-500">or drag and drop</p>}
+                </label>
+              </div>
+            </div>
             <button className="btn-primary" onClick={submitManualClaim}>Submit Manual Claim</button>
           </div>
         </Card>

@@ -43,6 +43,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthRes
         user_id=user.id,
         name=user.name,
         role=user.role,
+        location=user.location,
         risk_score=user.risk_score,
         risk_tier=user.risk_tier,
     )
@@ -62,6 +63,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
         user_id=user.id,
         name=user.name,
         role=user.role,
+        location=user.location,
         risk_score=user.risk_score,
         risk_tier=user.risk_tier,
     )

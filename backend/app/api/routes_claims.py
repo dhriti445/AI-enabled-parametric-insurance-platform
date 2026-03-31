@@ -1,6 +1,8 @@
 from datetime import datetime
+import os
+import shutil
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -10,6 +12,10 @@ from app.services.fraud_detector import FraudSignal, fraud_detector
 from app.services.image_verifier import verify_claim_image
 
 router = APIRouter(prefix="/claims", tags=["claims"])
+
+# Create uploads directory if not exists
+UPLOADS_DIR = "uploads"
+os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 
 @router.get("/user/{user_id}")
@@ -30,10 +36,29 @@ def list_claims(user_id: int, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/manual")
-def manual_claim(payload: ManualClaimRequest, db: Session = Depends(get_db)) -> dict:
-    user = db.query(User).filter(User.id == payload.user_id).first()
+def manual_claim(
+    user_id: int = Form(...),
+    estimated_income_loss: float = Form(...),
+    proof_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> dict:
+    user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Validate file type
+    allowed_types = {".jpg", ".jpeg", ".png", ".mp4", "image/jpeg", "image/png", "video/mp4"}
+    file_ext = os.path.splitext(proof_file.filename)[1].lower()
+    if file_ext not in allowed_types and proof_file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Only JPG, PNG, and MP4 files are allowed")
+
+    # Save file
+    file_path = os.path.join(UPLOADS_DIR, f"{user_id}_{proof_file.filename}")
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(proof_file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File upload failed: {str(e)}")
 
     active_sub = (
         db.query(Subscription)
@@ -44,7 +69,7 @@ def manual_claim(payload: ManualClaimRequest, db: Session = Depends(get_db)) -> 
     if not active_sub:
         raise HTTPException(status_code=400, detail="No active subscription")
 
-    image_ok, image_msg, confidence = verify_claim_image(payload.image_filename)
+    image_ok, image_msg, confidence = verify_claim_image(file_path)
     duplicate_claims = db.query(Claim).filter(Claim.user_id == user.id).count()
     fraud_score, flagged = fraud_detector.score(
         FraudSignal(gps_mismatch=0, duplicate_claims=1 if duplicate_claims > 2 else 0, odd_claim_hour=0)
@@ -56,13 +81,13 @@ def manual_claim(payload: ManualClaimRequest, db: Session = Depends(get_db)) -> 
     elif flagged:
         status = "Flagged"
 
-    approved_amount = min(payload.estimated_income_loss, active_sub.weekly_coverage)
+    approved_amount = min(estimated_income_loss, active_sub.weekly_coverage)
     claim = Claim(
         user_id=user.id,
         estimated_income_loss=approved_amount,
         status=status,
         fraud_score=max(fraud_score, 1 - confidence),
-        manual_proof_url=payload.image_filename,
+        manual_proof_url=file_path,
         created_at=datetime.utcnow(),
     )
     db.add(claim)

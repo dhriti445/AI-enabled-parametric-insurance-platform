@@ -11,6 +11,7 @@ export default function SubscriptionPage() {
   const [recommendation, setRecommendation] = useState(null);
   const [selectedPlan, setSelectedPlan] = useState('Standard');
   const [status, setStatus] = useState('');
+  const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -20,11 +21,19 @@ export default function SubscriptionPage() {
     ]).then(([planRes, recRes]) => {
       setPlans(planRes.data.plans);
       setRecommendation(recRes.data);
-      setSelectedPlan(recRes.data.recommended_plan);
+      if (!isInitialized) {
+        setSelectedPlan(recRes.data.recommended_plan);
+        setIsInitialized(true);
+      }
     });
-  }, [user]);
+  }, [user?.user_id]);
 
   const planRows = useMemo(() => Object.entries(plans), [plans]);
+
+  const handlePlanSelect = (planName) => {
+    console.log('Selecting plan:', planName);
+    setSelectedPlan(planName);
+  };
 
   const activatePlan = async () => {
     if (!user) return;
@@ -44,6 +53,16 @@ export default function SubscriptionPage() {
 
   return (
     <Layout title="Weekly Protection Plans" subtitle="Choose your plan, activate weekly coverage, and stay protected from disruptions.">
+      <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50 p-6">
+        <h2 className="font-heading text-xl font-bold text-blue-900">About Our Platform</h2>
+        <p className="mt-2 text-sm text-blue-800">
+          AI Parametric Insurance Platform provides <strong>zero-touch automated payouts</strong> for gig workers, daily laborers, and seasonal workers affected by disruptions like heavy rainfall, poor air quality, extreme heat, curfew alerts, and high winds.
+        </p>
+        <p className="mt-2 text-sm text-blue-800">
+          How it works: Register with your location, choose a protection plan, and our AI continuously monitors live weather and environmental data. <strong>When a disruption is detected, automatic payouts are triggered instantly</strong>—no manual claims, no waiting.
+        </p>
+      </div>
+
       <div className="mb-6 grid gap-4 md:grid-cols-2">
         <Card>
           <p className="font-heading text-xl font-bold text-brand-900">AI Recommendation</p>
@@ -56,27 +75,65 @@ export default function SubscriptionPage() {
         </Card>
         <Card>
           <p className="font-heading text-xl font-bold text-brand-900">Coverage Snapshot</p>
-          <p className="mt-2 text-sm text-slate-700">City: {user?.name ? user.name : 'Worker'} - {user?.risk_tier} Risk Zone</p>
-          <p className="mt-1 text-sm text-slate-700">Weekly disruptions are monitored for rainfall, AQI, temperature, and curfew alerts.</p>
-          <p className="mt-4 text-sm font-semibold text-accent-700">Click Activate Weekly Protection to start.</p>
+          <p className="mt-2 text-sm text-slate-700"><strong>{user?.name}</strong> • <strong>{user?.location}</strong> • <strong>{user?.risk_tier} Risk Zone</strong></p>
+          <div className="mt-4 space-y-2">
+            <p className="text-xs text-slate-600">📍 <strong>Location-based monitoring:</strong> Weather, air quality, temperature, curfews, and wind patterns specific to {user?.location}</p>
+            <p className="text-xs text-slate-600">⚡ <strong>Automatic payouts:</strong> Funds transfer within minutes of disruption detection</p>
+            <p className="text-xs text-slate-600">🛡️ <strong>Fraud detection:</strong> AI-powered image verification and claim validation</p>
+          </div>
+          <p className="mt-4 text-sm font-semibold text-accent-700">Select a plan below and activate protection today.</p>
         </Card>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
-        {planRows.map(([name, plan]) => (
-          <div
-            key={name}
-            className={`cursor-pointer rounded-2xl border border-white/70 bg-white p-5 shadow-soft transition hover:-translate-y-1 ${selectedPlan === name ? 'ring-2 ring-brand-500' : ''}`}
-            onClick={() => setSelectedPlan(name)}
-            role="button"
-            tabIndex="0"
-            onKeyDown={(e) => e.key === 'Enter' && setSelectedPlan(name)}
-          >
-            <p className="font-heading text-lg font-bold text-brand-900">{name} Plan</p>
-            <p className="mt-2 text-2xl font-extrabold text-slate-900">Rs.{plan.weekly_price}<span className="text-sm font-medium text-slate-500">/week</span></p>
-            <p className="mt-2 text-sm text-slate-700">Coverage up to Rs.{plan.weekly_coverage}</p>
-          </div>
-        ))}
+        {planRows.map(([name, plan]) => {
+          const planDetails = {
+            Basic: {
+              description: 'For occasional workers seeking minimal protection',
+              features: ['Weekly coverage up to Rs.400', 'Rainfall detection', 'No medical emergency cover'],
+            },
+            Standard: {
+              description: 'Most popular for daily workers in high-risk zones',
+              features: ['Weekly coverage up to Rs.700', 'Rainfall + AQI + Temperature monitoring', 'Automated payouts on disruption'],
+            },
+            Premium: {
+              description: 'Maximum protection for gig workers and daily laborers',
+              features: ['Weekly coverage up to Rs.1000', 'Full disruption monitoring', 'Priority fast-track payouts', 'Curfew alert coverage'],
+            },
+          };
+          const details = planDetails[name];
+          return (
+            <button
+              key={name}
+              type="button"
+              className={`w-full rounded-2xl border-2 bg-white p-5 shadow-soft transition hover:-translate-y-1 focus:outline-none ${
+                selectedPlan === name
+                  ? 'border-brand-500 ring-2 ring-brand-500'
+                  : 'border-slate-200 hover:border-brand-300'
+              }`}
+              onClick={() => handlePlanSelect(name)}
+            >
+              <p className="font-heading text-lg font-bold text-brand-900">{name} Plan</p>
+              <p className="mt-1 text-xs text-slate-500">{details.description}</p>
+              <p className="mt-3 text-2xl font-extrabold text-slate-900">
+                Rs.{plan.weekly_price}
+                <span className="text-sm font-medium text-slate-500">/week</span>
+              </p>
+              <ul className="mt-3 space-y-1">
+                {details.features.map((feature, idx) => (
+                  <li key={idx} className="flex items-start gap-2 text-xs text-slate-600">
+                    <span className="mt-1 text-brand-600">✓</span>
+                    <span>{feature}</span>
+                  </li>
+                ))}
+              </ul>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 rounded-lg bg-brand-50 p-3">
+        <p className="text-sm font-semibold text-brand-900">Selected Plan: <span className="text-lg">{selectedPlan}</span></p>
       </div>
 
       <div className="mt-6 flex flex-col items-start gap-2 sm:flex-row sm:items-center">
