@@ -10,6 +10,7 @@ export default function SubscriptionPage() {
   const [plans, setPlans] = useState({});
   const [recommendation, setRecommendation] = useState(null);
   const [selectedPlan, setSelectedPlan] = useState('Standard');
+  const [dynamicQuote, setDynamicQuote] = useState(null);
   const [status, setStatus] = useState('');
   const [isInitialized, setIsInitialized] = useState(false);
 
@@ -21,12 +22,23 @@ export default function SubscriptionPage() {
     ]).then(([planRes, recRes]) => {
       setPlans(planRes.data.plans);
       setRecommendation(recRes.data);
+      setDynamicQuote(recRes.data.dynamic_pricing || null);
       if (!isInitialized) {
         setSelectedPlan(recRes.data.recommended_plan);
         setIsInitialized(true);
       }
     });
   }, [user?.user_id]);
+
+  useEffect(() => {
+    if (!user || !selectedPlan) return;
+    api
+      .get(`/subscriptions/pricing-preview/${user.user_id}`, {
+        params: { plan_name: selectedPlan },
+      })
+      .then((res) => setDynamicQuote(res.data.quote))
+      .catch(() => setDynamicQuote(null));
+  }, [user?.user_id, selectedPlan]);
 
   const planRows = useMemo(() => Object.entries(plans), [plans]);
 
@@ -116,9 +128,14 @@ export default function SubscriptionPage() {
               <p className="font-heading text-lg font-bold text-brand-900">{name} Plan</p>
               <p className="mt-1 text-xs text-slate-500">{details.description}</p>
               <p className="mt-3 text-2xl font-extrabold text-slate-900">
-                Rs.{plan.weekly_price}
+                Rs.{selectedPlan === name && dynamicQuote ? dynamicQuote.adjusted_weekly_price : plan.weekly_price}
                 <span className="text-sm font-medium text-slate-500">/week</span>
               </p>
+              {selectedPlan === name && dynamicQuote && (
+                <p className="mt-1 text-xs font-semibold text-emerald-700">
+                  Delta: Rs.{dynamicQuote.price_delta} | Safe zone discount: Rs.{dynamicQuote.safe_zone_discount}
+                </p>
+              )}
               <ul className="mt-3 space-y-1">
                 {details.features.map((feature, idx) => (
                   <li key={idx} className="flex items-start gap-2 text-xs text-slate-600">
@@ -134,6 +151,11 @@ export default function SubscriptionPage() {
 
       <div className="mt-4 rounded-lg bg-brand-50 p-3">
         <p className="text-sm font-semibold text-brand-900">Selected Plan: <span className="text-lg">{selectedPlan}</span></p>
+        {dynamicQuote && (
+          <p className="mt-1 text-sm text-brand-900">
+            Dynamic Premium: <strong>Rs.{dynamicQuote.adjusted_weekly_price}/week</strong> | Coverage Hours: <strong>{dynamicQuote.final_coverage_hours}</strong> ({dynamicQuote.extra_coverage_hours >= 0 ? '+' : ''}{dynamicQuote.extra_coverage_hours} weather-based)
+          </p>
+        )}
       </div>
 
       <div className="mt-6 flex flex-col items-start gap-2 sm:flex-row sm:items-center">

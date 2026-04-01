@@ -7,15 +7,26 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.entities import Claim, Goal, Notification, Payout, Subscription, User
 from app.schemas.dto import GoalRequest, PlanChoiceRequest
+from app.services.dynamic_pricing import quote_dynamic_pricing
 from app.services.payments import simulate_payment
 from app.services.suggestion_engine import suggest_extra_days
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
 PLANS = {
-    "Basic": {"weekly_price": 20.0, "weekly_coverage": 400.0},
-    "Standard": {"weekly_price": 30.0, "weekly_coverage": 700.0},
-    "Premium": {"weekly_price": 40.0, "weekly_coverage": 1000.0},
+    "Basic": {"weekly_price": 20.0, "weekly_coverage": 400.0, "base_coverage_hours": 40, "hourly_coverage_value": 10.0},
+    "Standard": {
+        "weekly_price": 30.0,
+        "weekly_coverage": 700.0,
+        "base_coverage_hours": 56,
+        "hourly_coverage_value": 12.5,
+    },
+    "Premium": {
+        "weekly_price": 40.0,
+        "weekly_coverage": 1000.0,
+        "base_coverage_hours": 72,
+        "hourly_coverage_value": 14.0,
+    },
 }
 
 
@@ -37,12 +48,48 @@ def recommendation(user_id: int, db: Session = Depends(get_db)) -> dict:
     else:
         plan = "Premium"
 
+    dynamic_quote = quote_dynamic_pricing(
+        location=user.location,
+        user_risk_score=user.risk_score,
+        base_weekly_price=PLANS[plan]["weekly_price"],
+        base_coverage_hours=PLANS[plan]["base_coverage_hours"],
+        hourly_coverage_value=PLANS[plan]["hourly_coverage_value"],
+    )
+
     return {
         "user_id": user.id,
         "risk_score": user.risk_score,
         "risk_tier": user.risk_tier,
         "recommended_plan": plan,
         "reason": f"Based on location risk and disruption history in {user.location}",
+        "dynamic_pricing": dynamic_quote,
+    }
+
+
+@router.get("/pricing-preview/{user_id}")
+def pricing_preview(user_id: int, plan_name: str = "Standard", db: Session = Depends(get_db)) -> dict:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if plan_name not in PLANS:
+        raise HTTPException(status_code=400, detail="Invalid plan")
+
+    plan = PLANS[plan_name]
+    quote = quote_dynamic_pricing(
+        location=user.location,
+        user_risk_score=user.risk_score,
+        base_weekly_price=plan["weekly_price"],
+        base_coverage_hours=plan["base_coverage_hours"],
+        hourly_coverage_value=plan["hourly_coverage_value"],
+    )
+
+    return {
+        "user_id": user.id,
+        "plan_name": plan_name,
+        "location": user.location,
+        "risk_score": user.risk_score,
+        "quote": quote,
     }
 
 
@@ -58,20 +105,30 @@ def activate_plan(payload: PlanChoiceRequest, db: Session = Depends(get_db)) -> 
     db.query(Subscription).filter(Subscription.user_id == user.id, Subscription.active == True).update({"active": False})
 
     plan = PLANS[payload.plan_name]
-    payment = simulate_payment(payload.provider, plan["weekly_price"])
+    quote = quote_dynamic_pricing(
+        location=user.location,
+        user_risk_score=user.risk_score,
+        base_weekly_price=plan["weekly_price"],
+        base_coverage_hours=plan["base_coverage_hours"],
+        hourly_coverage_value=plan["hourly_coverage_value"],
+    )
+    payment = simulate_payment(payload.provider, quote["adjusted_weekly_price"])
 
     sub = Subscription(
         user_id=user.id,
         plan_name=payload.plan_name,
-        weekly_price=plan["weekly_price"],
-        weekly_coverage=plan["weekly_coverage"],
+        weekly_price=quote["adjusted_weekly_price"],
+        weekly_coverage=quote["adjusted_weekly_coverage"],
         payment_reference=payment["reference"],
     )
     db.add(sub)
     db.add(
         Notification(
             user_id=user.id,
-            message=f"{payload.plan_name} plan activated. Weekly protection is live.",
+            message=(
+                f"{payload.plan_name} activated at Rs.{quote['adjusted_weekly_price']}/week "
+                f"with {quote['final_coverage_hours']} coverage hours."
+            ),
         )
     )
     db.commit()
@@ -80,7 +137,9 @@ def activate_plan(payload: PlanChoiceRequest, db: Session = Depends(get_db)) -> 
     return {
         "subscription_id": sub.id,
         "active_plan": sub.plan_name,
+        "weekly_premium": sub.weekly_price,
         "weekly_coverage": sub.weekly_coverage,
+        "dynamic_pricing": quote,
         "payment_status": payment["status"],
         "payment_reference": payment["reference"],
         "provider": payment["provider"],
