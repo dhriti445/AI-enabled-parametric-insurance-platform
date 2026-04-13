@@ -11,7 +11,10 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=AuthResponse)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthResponse:
-    exists = db.query(User).filter((User.email == payload.email) | (User.phone == payload.phone)).first()
+    normalized_email = payload.email.strip().lower()
+    normalized_phone = payload.phone.strip()
+
+    exists = db.query(User).filter((User.email == normalized_email) | (User.phone == normalized_phone)).first()
     if exists:
         raise HTTPException(status_code=400, detail="User with this email or phone already exists")
 
@@ -23,12 +26,18 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthRes
         RiskInputs(rainfall_avg=rainfall_proxy, flood_zone_score=flood_zone_proxy, aqi_avg=aqi_proxy)
     )
 
-    role = UserRole.admin.value if payload.email.endswith("@insurer.com") else UserRole.worker.value
+    selected_role = payload.role.lower().strip()
+    if selected_role in {"admin", "insurer"}:
+        role = UserRole.admin.value
+    elif selected_role == "worker":
+        role = UserRole.worker.value
+    else:
+        raise HTTPException(status_code=400, detail="Invalid role")
 
     user = User(
         name=payload.name,
-        email=payload.email,
-        phone=payload.phone,
+        email=normalized_email,
+        phone=normalized_phone,
         platform=payload.platform,
         location=payload.location,
         risk_score=score,
@@ -51,13 +60,22 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthRes
 
 @router.post("/login", response_model=AuthResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
+    identifier = payload.email_or_phone.strip()
+    normalized_email = identifier.lower()
+
     user = (
         db.query(User)
-        .filter((User.email == payload.email_or_phone) | (User.phone == payload.email_or_phone))
+        .filter((User.email == normalized_email) | (User.phone == identifier))
         .first()
     )
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if payload.expected_role:
+        expected = payload.expected_role
+        expected_normalized = "admin" if expected == "insurer" else expected
+        if user.role != expected_normalized:
+            raise HTTPException(status_code=403, detail=f"This account is registered as {user.role}, not {expected_normalized}")
 
     return AuthResponse(
         user_id=user.id,

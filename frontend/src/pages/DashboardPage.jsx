@@ -11,8 +11,15 @@ export default function DashboardPage() {
   const [dashboard, setDashboard] = useState(null);
   const [claims, setClaims] = useState([]);
   const [goalInput, setGoalInput] = useState('25000');
-  const [manualClaim, setManualClaim] = useState({ estimated_income_loss: 500, proof_file: null });
+  const [manualClaim, setManualClaim] = useState({
+    estimated_income_loss: 500,
+    proof_file: null,
+    worker_lat: '',
+    worker_lon: '',
+    payout_provider: 'UPI',
+  });
   const [message, setMessage] = useState('');
+  const [locationStatus, setLocationStatus] = useState('pending');
 
   const loadData = async () => {
     if (!user) return;
@@ -72,18 +79,67 @@ export default function DashboardPage() {
     formData.append('user_id', user.user_id);
     formData.append('estimated_income_loss', Number(manualClaim.estimated_income_loss));
     formData.append('proof_file', manualClaim.proof_file);
+    formData.append('payout_provider', manualClaim.payout_provider);
+    if (manualClaim.worker_lat !== '') formData.append('worker_lat', Number(manualClaim.worker_lat));
+    if (manualClaim.worker_lon !== '') formData.append('worker_lon', Number(manualClaim.worker_lon));
 
     try {
       const { data } = await api.post('/claims/manual', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
-      setMessage(`Manual claim ${data.claim_status}.`);
-      setManualClaim({ estimated_income_loss: 500, proof_file: null });
+      const fraudReasonText = (data.fraud_reasons || []).length ? data.fraud_reasons.join(', ') : 'No suspicious signals.';
+      const payoutText = data.payout ? `Payout: ${data.payout.gateway} (${data.payout.reference})` : 'No payout due to claim status.';
+      setMessage(`Manual claim ${data.claim_status}. ${payoutText} Fraud notes: ${fraudReasonText}`);
+      setManualClaim({
+        estimated_income_loss: 500,
+        proof_file: null,
+        worker_lat: '',
+        worker_lon: '',
+        payout_provider: 'UPI',
+      });
+      setLocationStatus('pending');
+      captureDeviceLocation(false);
       await loadData();
     } catch (err) {
       setMessage(`Error: ${err.response?.data?.detail || 'Claim submission failed'}`);
     }
   };
+
+  const captureDeviceLocation = (showMessage = false) => {
+    if (!navigator.geolocation) {
+      setLocationStatus('not-supported');
+      if (showMessage) setMessage('Geolocation is not supported. We will use image metadata or city profile.');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLocationStatus('captured');
+        setManualClaim((prev) => ({
+          ...prev,
+          worker_lat: String(position.coords.latitude),
+          worker_lon: String(position.coords.longitude),
+        }));
+        if (showMessage) setMessage('Location captured automatically for claim verification.');
+      },
+      () => {
+        setLocationStatus('denied');
+        if (showMessage) setMessage('Location permission denied. We will use image metadata or city profile.');
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  useEffect(() => {
+    captureDeviceLocation(false);
+  }, []);
+
+  const locationBadge = {
+    pending: { text: 'Location: Detecting...', className: 'bg-amber-50 text-amber-700' },
+    captured: { text: 'Location: Captured', className: 'bg-emerald-50 text-emerald-700' },
+    denied: { text: 'Location: Permission denied', className: 'bg-red-50 text-red-700' },
+    'not-supported': { text: 'Location: Not supported', className: 'bg-slate-100 text-slate-700' },
+  }[locationStatus];
 
   if (!dashboard) return <Layout title="Worker Dashboard" subtitle="Loading insights..." />;
 
@@ -147,7 +203,10 @@ export default function DashboardPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-600">Proof (JPG, PNG, or MP4)</label>
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-semibold text-slate-600">Proof (JPG, PNG, or MP4)</label>
+                <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${locationBadge.className}`}>{locationBadge.text}</span>
+              </div>
               <div className="mt-1 rounded-lg border-2 border-dashed border-slate-300 px-4 py-6 text-center transition hover:border-brand-400">
                 <input
                   type="file"
@@ -155,6 +214,7 @@ export default function DashboardPage() {
                   onChange={(e) => {
                     if (e.target.files?.[0]) {
                       setManualClaim({ ...manualClaim, proof_file: e.target.files[0] });
+                      captureDeviceLocation();
                     }
                   }}
                   className="hidden"
@@ -175,6 +235,29 @@ export default function DashboardPage() {
                   {!manualClaim.proof_file && <p className="mt-1 text-xs text-slate-500">or drag and drop</p>}
                 </label>
               </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Auto Latitude</label>
+                <p className="input mt-1 flex items-center">{manualClaim.worker_lat || 'Will auto-detect on upload'}</p>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-600">Auto Longitude</label>
+                <p className="input mt-1 flex items-center">{manualClaim.worker_lon || 'Will auto-detect on upload'}</p>
+              </div>
+            </div>
+            <button type="button" className="btn-secondary" onClick={() => captureDeviceLocation(true)}>Refresh Location</button>
+            <div>
+              <label className="text-xs font-semibold text-slate-600">Payout Gateway</label>
+              <select
+                className="input mt-1"
+                value={manualClaim.payout_provider}
+                onChange={(e) => setManualClaim({ ...manualClaim, payout_provider: e.target.value })}
+              >
+                <option value="UPI">UPI Simulator</option>
+                <option value="Razorpay">Razorpay Test Mode</option>
+                <option value="Stripe">Stripe Sandbox</option>
+              </select>
             </div>
             <button className="btn-primary" onClick={submitManualClaim}>Submit Manual Claim</button>
           </div>

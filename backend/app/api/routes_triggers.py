@@ -7,6 +7,7 @@ from app.models.entities import Claim, DisruptionEvent, Notification, Payout, Su
 from app.schemas.dto import TriggerRequest
 from app.services.disruption_monitor import evaluate_trigger
 from app.services.fraud_detector import FraudSignal, fraud_detector
+from app.services.payments import simulate_payment
 from app.services.trigger_automation import evaluate_trigger_signals, fetch_disruption_inputs
 
 router = APIRouter(prefix="/triggers", tags=["triggers"])
@@ -57,12 +58,22 @@ def _create_auto_claims_for_event(
         db.flush()
 
         if not flagged:
-            payout = Payout(user_id=worker.id, claim_id=claim.id, amount=estimated_loss)
+            payout_gateway = "UPI" if worker.platform.lower() in {"swiggy", "zomato", "zepto", "blinkit"} else "Razorpay"
+            payment = simulate_payment(payout_gateway, estimated_loss)
+            payout = Payout(
+                user_id=worker.id,
+                claim_id=claim.id,
+                amount=estimated_loss,
+                payment_gateway=payment["provider"],
+            )
             db.add(payout)
             db.add(
                 Notification(
                     user_id=worker.id,
-                    message=f"{reason} detected. Automatic payout of Rs.{estimated_loss} processed.",
+                    message=(
+                        f"{reason} detected. Automatic payout of Rs.{estimated_loss} "
+                        f"processed via {payment['provider']} ({payment['reference']})."
+                    ),
                 )
             )
 
@@ -73,6 +84,13 @@ def _create_auto_claims_for_event(
                 "status": status,
                 "fraud_score": fraud_score,
                 "estimated_loss": estimated_loss,
+                "payout": {
+                    "provider": payment["provider"],
+                    "reference": payment["reference"],
+                    "settlement_eta": payment["settlement_eta"],
+                }
+                if not flagged
+                else None,
             }
         )
 

@@ -10,6 +10,7 @@ export default function SubscriptionPage() {
   const [plans, setPlans] = useState({});
   const [recommendation, setRecommendation] = useState(null);
   const [selectedPlan, setSelectedPlan] = useState('Standard');
+  const [selectedProvider, setSelectedProvider] = useState('UPI');
   const [dynamicQuote, setDynamicQuote] = useState(null);
   const [status, setStatus] = useState('');
   const [isInitialized, setIsInitialized] = useState(false);
@@ -54,9 +55,9 @@ export default function SubscriptionPage() {
       const { data } = await api.post('/subscriptions/activate', {
         user_id: user.user_id,
         plan_name: selectedPlan,
-        provider: 'Razorpay',
+        provider: selectedProvider,
       });
-      setStatus(`${data.payment_status} (${data.payment_reference})`);
+      setStatus(`${data.payment_status} via ${data.provider} (${data.payment_reference}) • ${data.dynamic_pricing.inputs.source}`);
       setTimeout(() => navigate('/dashboard'), 900);
     } catch (err) {
       setStatus(err.response?.data?.detail || 'Activation failed');
@@ -159,6 +160,11 @@ export default function SubscriptionPage() {
       </div>
 
       <div className="mt-6 flex flex-col items-start gap-2 sm:flex-row sm:items-center">
+        <select className="input w-full sm:w-56" value={selectedProvider} onChange={(e) => setSelectedProvider(e.target.value)}>
+          <option value="UPI">UPI Simulator</option>
+          <option value="Razorpay">Razorpay Test Mode</option>
+          <option value="Stripe">Stripe Sandbox</option>
+        </select>
         <button className="btn-primary" onClick={activatePlan}>Activate Weekly Protection</button>
         <span className="text-sm font-medium text-slate-600">{status}</span>
       </div>

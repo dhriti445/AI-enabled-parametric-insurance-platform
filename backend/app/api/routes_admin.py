@@ -1,9 +1,11 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.entities import Claim, Payout, Subscription, User
+from app.models.entities import Claim, DisruptionEvent, Payout, Subscription, User
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -50,6 +52,49 @@ def overview(db: Session = Depends(get_db)) -> dict:
         for row in region_pricing
     ]
 
+    prediction_window_start = datetime.utcnow() - timedelta(days=28)
+    city_rows = (
+        db.query(User.location, func.count(User.id).label("workers"))
+        .filter(User.role == "worker")
+        .group_by(User.location)
+        .all()
+    )
+
+    weekly_predictions = []
+    for city_row in city_rows:
+        triggered_events = (
+            db.query(DisruptionEvent)
+            .filter(
+                DisruptionEvent.location == city_row.location,
+                DisruptionEvent.created_at >= prediction_window_start,
+                DisruptionEvent.triggered == True,
+            )
+            .all()
+        )
+
+        triggered_count = len(triggered_events)
+        rainfall_avg = (
+            float(sum(event.rainfall_mm for event in triggered_events) / triggered_count)
+            if triggered_count
+            else 0.0
+        )
+        forecast_disruptions = round((triggered_count / 4.0) + (rainfall_avg / 120.0), 2)
+        expected_claims = int(round(min(city_row.workers, city_row.workers * min(1.0, forecast_disruptions / 3.0))))
+
+        weekly_predictions.append(
+            {
+                "region": city_row.location,
+                "workers": int(city_row.workers),
+                "recent_triggered_events": triggered_count,
+                "avg_trigger_rainfall_mm": round(rainfall_avg, 2),
+                "forecast_disruptions_next_week": forecast_disruptions,
+                "predicted_claims_next_week": expected_claims,
+                "confidence": "Medium" if triggered_count >= 2 else "Low",
+            }
+        )
+
+    weekly_predictions.sort(key=lambda row: row["predicted_claims_next_week"], reverse=True)
+
     return {
         "metrics": {
             "total_users": total_users,
@@ -62,4 +107,5 @@ def overview(db: Session = Depends(get_db)) -> dict:
         ],
         "risk_zone_classification": risk_zones,
         "subscription_optimization": optimization,
+        "weekly_claim_predictions": weekly_predictions,
     }

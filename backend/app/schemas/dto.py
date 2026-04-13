@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -9,10 +10,12 @@ class RegisterRequest(BaseModel):
     phone: str
     platform: str
     location: str
+    role: Literal["worker", "insurer", "admin"] = "worker"
 
 
 class LoginRequest(BaseModel):
     email_or_phone: str
+    expected_role: Literal["worker", "admin", "insurer"] | None = None
 
 
 class AuthResponse(BaseModel):

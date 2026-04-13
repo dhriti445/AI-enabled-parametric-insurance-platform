@@ -17,13 +17,19 @@ export default function LoginPage() {
   const [registerData, setRegisterData] = useState(initialRegister);
   const [loginInput, setLoginInput] = useState('');
   const [mode, setMode] = useState('register');
+  const [accountType, setAccountType] = useState('worker');
   const [error, setError] = useState('');
 
   const handleRegister = async (e) => {
     e.preventDefault();
     setError('');
     try {
-      const { data } = await api.post('/auth/register', registerData);
+      const payload = {
+        ...registerData,
+        role: accountType,
+        platform: accountType === 'insurer' ? 'Insurer Portal' : registerData.platform,
+      };
+      const { data } = await api.post('/auth/register', payload);
       saveUser(data);
       navigate(data.role === 'admin' ? '/admin' : '/subscribe');
     } catch (err) {
@@ -35,7 +41,11 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     try {
-      const { data } = await api.post('/auth/login', { email_or_phone: loginInput });
+      const expectedRole = accountType === 'insurer' ? 'admin' : 'worker';
+      const { data } = await api.post('/auth/login', {
+        email_or_phone: loginInput.trim(),
+        expected_role: expectedRole,
+      });
       saveUser(data);
       navigate(data.role === 'admin' ? '/admin' : '/subscribe');
     } catch (err) {
@@ -60,6 +70,23 @@ export default function LoginPage() {
         </Card>
 
         <Card className="animate-rise [animation-delay:120ms]">
+          <div className="mb-4 flex rounded-xl bg-brand-50 p-1 text-sm font-semibold">
+            <button
+              type="button"
+              className={`w-1/2 rounded-lg px-3 py-2 ${accountType === 'worker' ? 'bg-white text-brand-900' : 'text-slate-600'}`}
+              onClick={() => setAccountType('worker')}
+            >
+              Worker Portal
+            </button>
+            <button
+              type="button"
+              className={`w-1/2 rounded-lg px-3 py-2 ${accountType === 'insurer' ? 'bg-white text-brand-900' : 'text-slate-600'}`}
+              onClick={() => setAccountType('insurer')}
+            >
+              Insurer Portal
+            </button>
+          </div>
+
           <div className="mb-4 flex rounded-xl bg-slate-100 p-1 text-sm font-semibold">
             <button
               type="button"
@@ -82,19 +109,25 @@ export default function LoginPage() {
               <input className="input" placeholder="Name" value={registerData.name} onChange={(e) => setRegisterData({ ...registerData, name: e.target.value })} required />
               <input className="input" placeholder="Email" type="email" value={registerData.email} onChange={(e) => setRegisterData({ ...registerData, email: e.target.value })} required />
               <input className="input" placeholder="Phone" value={registerData.phone} onChange={(e) => setRegisterData({ ...registerData, phone: e.target.value })} required />
-              <select className="input" value={registerData.platform} onChange={(e) => setRegisterData({ ...registerData, platform: e.target.value })}>
-                <option>Swiggy</option>
-                <option>Zomato</option>
-                <option>Amazon</option>
-                <option>Flipkart</option>
-              </select>
-              <input className="input" placeholder="City / Work Zone" value={registerData.location} onChange={(e) => setRegisterData({ ...registerData, location: e.target.value })} required />
-              <button className="btn-primary" type="submit">Create Account</button>
+              {accountType === 'worker' ? (
+                <>
+                  <select className="input" value={registerData.platform} onChange={(e) => setRegisterData({ ...registerData, platform: e.target.value })}>
+                    <option>Swiggy</option>
+                    <option>Zomato</option>
+                    <option>Amazon</option>
+                    <option>Flipkart</option>
+                  </select>
+                  <input className="input" placeholder="City / Work Zone" value={registerData.location} onChange={(e) => setRegisterData({ ...registerData, location: e.target.value })} required />
+                </>
+              ) : (
+                <input className="input" placeholder="Insurer HQ City" value={registerData.location} onChange={(e) => setRegisterData({ ...registerData, location: e.target.value })} required />
+              )}
+              <button className="btn-primary" type="submit">{accountType === 'insurer' ? 'Create Insurer Account' : 'Create Worker Account'}</button>
             </form>
           ) : (
             <form onSubmit={handleLogin} className="grid gap-3">
               <input className="input" placeholder="Email or Phone" value={loginInput} onChange={(e) => setLoginInput(e.target.value)} required />
-              <button className="btn-primary" type="submit">Login</button>
+              <button className="btn-primary" type="submit">{accountType === 'insurer' ? 'Login as Insurer' : 'Login as Worker'}</button>
             </form>
           )}
 

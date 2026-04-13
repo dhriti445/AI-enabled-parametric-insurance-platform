@@ -16,6 +16,7 @@ export default function AdminPage() {
   if (!data) return <Layout title="Insurer Admin Dashboard" subtitle="Loading analytics..." />;
 
   const zoneData = Object.entries(data.risk_zone_classification).map(([zone, count]) => ({ zone, count }));
+  const weeklyPredictions = data.weekly_claim_predictions || [];
 
   return (
     <Layout title="Insurer Control Tower" subtitle="Monitor platform risk, fraud signals, payouts, and AI-driven pricing optimization.">
@@ -74,6 +75,39 @@ export default function AdminPage() {
                   <td className="py-2">{row.recommended_premium_adjustment}</td>
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card className="mt-6">
+        <p className="font-heading text-lg font-bold text-brand-900">Next Week Disruption Claim Forecast</p>
+        <p className="mt-1 text-xs text-slate-500">Predictive analytics based on recent triggered events and city-level worker density.</p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr className="text-left text-slate-500">
+                <th className="py-2">Region</th>
+                <th className="py-2">Predicted Claims</th>
+                <th className="py-2">Forecasted Disruptions</th>
+                <th className="py-2">Recent Triggered Events</th>
+                <th className="py-2">Confidence</th>
+              </tr>
+            </thead>
+            <tbody>
+              {weeklyPredictions.length ? weeklyPredictions.map((row) => (
+                <tr key={row.region} className="border-t border-slate-100">
+                  <td className="py-2">{row.region}</td>
+                  <td className="py-2 font-semibold text-brand-900">{row.predicted_claims_next_week}</td>
+                  <td className="py-2">{row.forecast_disruptions_next_week}</td>
+                  <td className="py-2">{row.recent_triggered_events}</td>
+                  <td className="py-2">{row.confidence}</td>
+                </tr>
+              )) : (
+                <tr>
+                  <td className="py-3 text-slate-500" colSpan={5}>No event history available yet for prediction.</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
