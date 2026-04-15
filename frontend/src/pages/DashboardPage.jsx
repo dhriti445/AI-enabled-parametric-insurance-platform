@@ -50,12 +50,12 @@ export default function DashboardPage() {
 
   const triggerMockEvent = async () => {
     const location = (dashboard?.user?.location || 'mumbai').toLowerCase();
-    setMessage(`Checking automated disruption signals for ${location}...`);
-    const { data } = await api.post(`/triggers/monitor/auto/${location}`);
+    setMessage(`Checking latest disruption status for ${location}...`);
+    const { data } = await api.get(`/triggers/latest/${location}`);
     if (data.triggered) {
-      setMessage(`${data.reason} detected via ${data.source}. Auto-claims created for eligible workers.`);
+      setMessage(`${data.reason} detected. Source: ${data.source}. Event #${data.event_id}.`);
     } else {
-      setMessage(`No severe disruption detected for ${location}. Source: ${data.source}.`);
+      setMessage(`No active disruption found for ${location}. ${data.reason}.`);
     }
     await loadData();
   };
@@ -67,6 +67,18 @@ export default function DashboardPage() {
     });
     setMessage('Monthly goal updated.');
     await loadData();
+  };
+
+  const cancelSubscription = async () => {
+    if (!window.confirm('Are you sure you want to cancel your active subscription?')) return;
+
+    try {
+      const { data } = await api.post('/subscriptions/cancel', { user_id: user.user_id });
+      setMessage(`${data.cancelled_plan} subscription cancelled successfully.`);
+      await loadData();
+    } catch (err) {
+      setMessage(err.response?.data?.detail || 'Failed to cancel subscription.');
+    }
   };
 
   const submitManualClaim = async () => {
@@ -144,7 +156,11 @@ export default function DashboardPage() {
   if (!dashboard) return <Layout title="Worker Dashboard" subtitle="Loading insights..." />;
 
   return (
-    <Layout title="Worker Protection Dashboard" subtitle="Track protection, disruptions, payouts, and AI suggestions to boost your earnings.">
+    <Layout
+      title="Worker Protection Dashboard"
+      subtitle="Track protection, disruptions, payouts, and AI suggestions to boost your earnings."
+      maxWidthClass="max-w-[1500px]"
+    >
       <div className="grid gap-4 md:grid-cols-4">
         <Stat title="Active Plan" value={dashboard.active_plan} />
         <Stat title="Coverage Status" value={dashboard.weekly_coverage_status} />
@@ -152,44 +168,104 @@ export default function DashboardPage() {
         <Stat title="Total Payouts" value={`Rs.${dashboard.total_payouts_received}`} />
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[1.3fr_0.7fr]">
-        <Card>
-          <div className="flex items-center justify-between">
-            <p className="font-heading text-lg font-bold text-brand-900">Protection Trend</p>
-            <button className="btn-secondary" onClick={triggerMockEvent}>Run Auto Trigger Check</button>
-          </div>
-          <div className="mt-4 h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#1f8f86" stopOpacity={0.8} />
-                    <stop offset="95%" stopColor="#1f8f86" stopOpacity={0.05} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="4 4" stroke="#d7e5e3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Area type="monotone" dataKey="value" stroke="#11635d" fill="url(#grad)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
+      <div className="mt-6 grid items-start gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
+        <aside className="space-y-4 lg:sticky lg:top-4 lg:self-start">
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="font-heading text-lg font-bold text-brand-900">Plan Controls</p>
+                <p className="text-sm text-slate-600">Change your plan or cancel and reactivate anytime.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button className="btn-secondary" onClick={() => navigate('/subscribe')}>Change Plan</button>
+                <button className="btn-secondary" onClick={cancelSubscription}>Cancel Subscription</button>
+              </div>
+            </div>
+          </Card>
 
-        <Card>
-          <p className="font-heading text-lg font-bold text-brand-900">Goal Tracker</p>
-          <p className="mt-2 text-sm text-slate-700">Target: Rs.{dashboard.goal.monthly_target}</p>
-          <p className="text-sm text-slate-700">Progress: Rs.{dashboard.goal.current_progress}</p>
-          <p className="text-sm text-slate-700">Remaining: Rs.{dashboard.goal.remaining}</p>
-          <input className="input mt-3" value={goalInput} onChange={(e) => setGoalInput(e.target.value)} placeholder="Set monthly goal" />
-          <button className="btn-primary mt-3" onClick={submitGoal}>Update Goal</button>
-          <p className="mt-4 rounded-xl bg-brand-50 p-3 text-sm font-semibold text-brand-900">{dashboard.work_suggestion}</p>
-        </Card>
-      </div>
+          <Card>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="font-heading text-lg font-bold text-brand-900">Claims History</p>
+              <button
+                className="btn-secondary"
+                onClick={() => {
+                  clearUser();
+                  navigate('/');
+                }}
+              >
+                Logout
+              </button>
+            </div>
+            <div className="mt-3 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left text-slate-500">
+                    <th className="py-2">Claim ID</th>
+                    <th className="py-2">Loss</th>
+                    <th className="py-2">Status</th>
+                    <th className="py-2">Fraud Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {claims.map((c) => (
+                    <tr key={c.id} className="border-t border-slate-100">
+                      <td className="py-2">#{c.id}</td>
+                      <td className="py-2">Rs.{c.estimated_income_loss}</td>
+                      <td className="py-2">{c.status}</td>
+                      <td className="py-2">{Number(c.fraud_score).toFixed(2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </aside>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <Card>
+        <section className="space-y-4">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
+            <Card>
+              <div className="flex items-center justify-between">
+                <p className="font-heading text-lg font-bold text-brand-900">Protection Trend</p>
+                <button className="btn-secondary" onClick={triggerMockEvent}>Check Latest Disruption</button>
+              </div>
+              <div className="mt-4 h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={chartData}>
+                    <defs>
+                      <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#1f8f86" stopOpacity={0.8} />
+                        <stop offset="95%" stopColor="#1f8f86" stopOpacity={0.05} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="4 4" stroke="#d7e5e3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+                    <Area type="monotone" dataKey="value" stroke="#11635d" fill="url(#grad)" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+
+            <Card>
+              <p className="font-heading text-lg font-bold text-brand-900">Goal Tracker</p>
+              <p className="mt-2 text-sm text-slate-700">Target: Rs.{dashboard.goal.monthly_target}</p>
+              <p className="text-sm text-slate-700">Progress: Rs.{dashboard.goal.current_progress}</p>
+              <p className="text-sm text-slate-700">Remaining: Rs.{dashboard.goal.remaining}</p>
+              <input className="input mt-3" value={goalInput} onChange={(e) => setGoalInput(e.target.value)} placeholder="Set monthly goal" />
+              <button className="btn-primary mt-3" onClick={submitGoal}>Update Goal</button>
+              <p className="mt-4 rounded-xl bg-brand-50 p-3 text-sm font-semibold text-brand-900">{dashboard.work_suggestion}</p>
+            </Card>
+          </div>
+
+          {message && (
+            <Card>
+              <p className="text-sm font-semibold text-brand-700">{message}</p>
+            </Card>
+          )}
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <Card>
           <p className="font-heading text-lg font-bold text-brand-900">Manual Claim + AI Image Verification</p>
           <div className="mt-3 grid gap-3">
             <div>
@@ -261,55 +337,19 @@ export default function DashboardPage() {
             </div>
             <button className="btn-primary" onClick={submitManualClaim}>Submit Manual Claim</button>
           </div>
-        </Card>
+            </Card>
 
-        <Card>
-          <p className="font-heading text-lg font-bold text-brand-900">Recent Notifications</p>
-          <ul className="mt-3 grid gap-2 text-sm text-slate-700">
-            {dashboard.latest_notifications.length ? dashboard.latest_notifications.map((note) => (
-              <li key={note} className="rounded-lg bg-slate-100 p-2">{note}</li>
-            )) : <li className="rounded-lg bg-slate-100 p-2">No notifications yet.</li>}
-          </ul>
-        </Card>
+            <Card>
+              <p className="font-heading text-lg font-bold text-brand-900">Recent Notifications</p>
+              <ul className="mt-3 grid gap-2 text-sm text-slate-700">
+                {dashboard.latest_notifications.length ? dashboard.latest_notifications.map((note) => (
+                  <li key={note} className="rounded-lg bg-slate-100 p-2">{note}</li>
+                )) : <li className="rounded-lg bg-slate-100 p-2">No notifications yet.</li>}
+              </ul>
+            </Card>
+          </div>
+        </section>
       </div>
-
-      <Card className="mt-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="font-heading text-lg font-bold text-brand-900">Claims History</p>
-          <button
-            className="btn-secondary"
-            onClick={() => {
-              clearUser();
-              navigate('/');
-            }}
-          >
-            Logout
-          </button>
-        </div>
-        <div className="mt-3 overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead>
-              <tr className="text-left text-slate-500">
-                <th className="py-2">Claim ID</th>
-                <th className="py-2">Loss</th>
-                <th className="py-2">Status</th>
-                <th className="py-2">Fraud Score</th>
-              </tr>
-            </thead>
-            <tbody>
-              {claims.map((c) => (
-                <tr key={c.id} className="border-t border-slate-100">
-                  <td className="py-2">#{c.id}</td>
-                  <td className="py-2">Rs.{c.estimated_income_loss}</td>
-                  <td className="py-2">{c.status}</td>
-                  <td className="py-2">{Number(c.fraud_score).toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {message && <p className="mt-3 text-sm font-semibold text-brand-700">{message}</p>}
-      </Card>
     </Layout>
   );
 }

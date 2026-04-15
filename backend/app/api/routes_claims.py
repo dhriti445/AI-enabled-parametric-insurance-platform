@@ -117,7 +117,6 @@ def manual_claim(
     proof_file: UploadFile = File(...),
     worker_lat: float | None = Form(default=None),
     worker_lon: float | None = Form(default=None),
-    payout_provider: str = Form(default="UPI"),
     db: Session = Depends(get_db),
 ) -> dict:
     user = db.query(User).filter(User.id == user_id).first()
@@ -198,7 +197,7 @@ def manual_claim(
         )
     )
 
-    status = "Approved"
+    status = "Pending Review"
     if not image_ok:
         status = "Rejected"
     elif flagged:
@@ -217,24 +216,21 @@ def manual_claim(
     db.flush()
 
     payout_info = None
-    if status == "Approved":
-        payment = simulate_payment(payout_provider, approved_amount)
-        payout = Payout(user_id=user.id, claim_id=claim.id, amount=approved_amount, payment_gateway=payment["provider"])
-        db.add(payout)
-        payout_info = {
-            "status": payout.status,
-            "amount": approved_amount,
-            "gateway": payout.payment_gateway,
-            "reference": payment["reference"],
-            "settlement_eta": payment["settlement_eta"],
-        }
+    if status in {"Pending Review", "Flagged"}:
         db.add(
             Notification(
                 user_id=user.id,
                 message=(
-                    f"Manual claim approved for Rs.{approved_amount}. "
-                    f"Instant payout via {payment['provider']} ({payment['reference']})."
+                    f"Claim #{claim.id} submitted with status '{status}'. "
+                    "Insurer review is in progress."
                 ),
+            )
+        )
+    elif status == "Rejected":
+        db.add(
+            Notification(
+                user_id=user.id,
+                message=f"Claim #{claim.id} was rejected by AI image verification.",
             )
         )
 

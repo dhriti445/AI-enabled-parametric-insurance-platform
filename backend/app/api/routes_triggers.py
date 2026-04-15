@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -130,9 +130,24 @@ def monitor_disruption(payload: TriggerRequest, db: Session = Depends(get_db)) -
 
 
 @router.post("/monitor/auto/{location}")
-def monitor_disruption_auto(location: str, db: Session = Depends(get_db)) -> dict:
-    inputs = fetch_disruption_inputs(location)
-    reasons = evaluate_trigger_signals(inputs)
+def monitor_disruption_auto(location: str, force: bool = Query(default=False), db: Session = Depends(get_db)) -> dict:
+    if force:
+        inputs = {
+            "location": location,
+            "rainfall_mm": 96.0,
+            "aqi": 320,
+            "temperature_c": 45.0,
+            "curfew_alert": True,
+            "wind_speed_kmph": 62.0,
+            "source": "admin-forced simulation",
+            "fallback_used": False,
+            "forced": True,
+        }
+        reasons = ["Simulated server disruption"]
+    else:
+        inputs = fetch_disruption_inputs(location)
+        reasons = evaluate_trigger_signals(inputs)
+
     triggered = len(reasons) > 0
     reason = ", ".join(reasons) if reasons else "No disruption"
 
@@ -162,6 +177,36 @@ def monitor_disruption_auto(location: str, db: Session = Depends(get_db)) -> dic
         "signals": inputs,
         "affected_workers": len(affected_claims),
         "claims": affected_claims,
+    }
+
+
+@router.get("/latest/{location}")
+def latest_disruption(location: str, db: Session = Depends(get_db)) -> dict:
+    event = (
+        db.query(DisruptionEvent)
+        .filter(func.lower(DisruptionEvent.location) == location.lower())
+        .order_by(DisruptionEvent.created_at.desc())
+        .first()
+    )
+
+    if not event:
+        return {
+            "location": location,
+            "triggered": False,
+            "reason": "No disruption events recorded yet",
+            "created_at": None,
+            "source": "event-log",
+            "event_id": None,
+        }
+
+    source = "admin-forced simulation" if "Simulated server disruption" in (event.reason or "") else "event-log"
+    return {
+        "location": event.location,
+        "triggered": event.triggered,
+        "reason": event.reason,
+        "created_at": event.created_at,
+        "source": source,
+        "event_id": event.id,
     }
 
 

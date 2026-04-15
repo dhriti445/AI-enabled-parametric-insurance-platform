@@ -1,13 +1,111 @@
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models.entities import Claim, DisruptionEvent, Payout, Subscription, User
+from app.models.entities import Claim, DisruptionEvent, Notification, Payout, Subscription, User
+from app.schemas.dto import AdminClaimDecisionRequest
+from app.services.payments import simulate_payment
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.get("/claim-reviews")
+def list_claim_reviews(db: Session = Depends(get_db)) -> dict:
+    rows = (
+        db.query(Claim, User)
+        .join(User, User.id == Claim.user_id)
+        .filter(Claim.manual_proof_url.isnot(None), Claim.status.in_(["Pending Review", "Flagged"]))
+        .order_by(Claim.created_at.desc())
+        .all()
+    )
+
+    return {
+        "claims": [
+            {
+                "claim_id": claim.id,
+                "worker_id": worker.id,
+                "worker_name": worker.name,
+                "worker_platform": worker.platform,
+                "location": worker.location,
+                "estimated_income_loss": claim.estimated_income_loss,
+                "status": claim.status,
+                "fraud_score": claim.fraud_score,
+                "proof_url": claim.manual_proof_url,
+                "created_at": claim.created_at,
+            }
+            for claim, worker in rows
+        ]
+    }
+
+
+@router.post("/claim-reviews/{claim_id}/decision")
+def decide_claim_review(
+    claim_id: int,
+    payload: AdminClaimDecisionRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    claim = db.query(Claim).filter(Claim.id == claim_id).first()
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    if claim.manual_proof_url is None:
+        raise HTTPException(status_code=400, detail="Only manual image claims are reviewed here")
+
+    if claim.status not in {"Pending Review", "Flagged"}:
+        raise HTTPException(status_code=400, detail=f"Claim already processed with status: {claim.status}")
+
+    existing_payout = db.query(Payout).filter(Payout.claim_id == claim.id).first()
+    if existing_payout:
+        raise HTTPException(status_code=400, detail="Payout already created for this claim")
+
+    if payload.action == "reject":
+        claim.status = "Rejected"
+        db.add(
+            Notification(
+                user_id=claim.user_id,
+                message=f"Claim #{claim.id} rejected after insurer review.",
+            )
+        )
+        db.commit()
+        return {
+            "claim_id": claim.id,
+            "status": claim.status,
+            "payout": None,
+        }
+
+    payment = simulate_payment(payload.provider, claim.estimated_income_loss)
+    claim.status = "Approved"
+    payout = Payout(
+        user_id=claim.user_id,
+        claim_id=claim.id,
+        amount=claim.estimated_income_loss,
+        payment_gateway=payment["provider"],
+    )
+    db.add(payout)
+    db.add(
+        Notification(
+            user_id=claim.user_id,
+            message=(
+                f"Claim #{claim.id} approved by insurer. "
+                f"Payment via {payment['provider']} ({payment['reference']})."
+            ),
+        )
+    )
+    db.commit()
+
+    return {
+        "claim_id": claim.id,
+        "status": claim.status,
+        "payout": {
+            "provider": payment["provider"],
+            "reference": payment["reference"],
+            "settlement_eta": payment["settlement_eta"],
+            "amount": claim.estimated_income_loss,
+        },
+    }
 
 
 @router.get("/overview")
@@ -95,12 +193,19 @@ def overview(db: Session = Depends(get_db)) -> dict:
 
     weekly_predictions.sort(key=lambda row: row["predicted_claims_next_week"], reverse=True)
 
+    pending_reviews = (
+        db.query(Claim)
+        .filter(Claim.manual_proof_url.isnot(None), Claim.status.in_(["Pending Review", "Flagged"]))
+        .count()
+    )
+
     return {
         "metrics": {
             "total_users": total_users,
             "active_subscriptions": active_subscriptions,
             "total_payouts": float(total_payouts),
             "loss_ratio": loss_ratio,
+            "pending_claim_reviews": pending_reviews,
         },
         "fraud_analytics": [
             {"name": item.name, "fraud_score": float(item.fraud_score)} for item in flagged_users

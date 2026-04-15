@@ -52,6 +52,15 @@ class GoalRequest(BaseModel):
     monthly_target: float = Field(..., ge=5000, le=100000)
 
 
+class AdminClaimDecisionRequest(BaseModel):
+    action: Literal["approve", "reject"]
+    provider: Literal["UPI", "Razorpay", "Stripe"] = "UPI"
+
+
+class SubscriptionCancelRequest(BaseModel):
+    user_id: int
+
+
 class ClaimResponse(BaseModel):
     id: int
     user_id: int

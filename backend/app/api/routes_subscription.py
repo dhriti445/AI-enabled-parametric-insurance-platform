@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.entities import Claim, Goal, Notification, Payout, Subscription, User
-from app.schemas.dto import GoalRequest, PlanChoiceRequest
+from app.schemas.dto import GoalRequest, PlanChoiceRequest, SubscriptionCancelRequest
 from app.services.dynamic_pricing import quote_dynamic_pricing
 from app.services.payments import simulate_payment
 from app.services.suggestion_engine import suggest_extra_days
@@ -33,6 +33,28 @@ PLANS = {
 @router.get("/plans")
 def get_plans() -> dict:
     return {"plans": PLANS}
+
+
+@router.get("/status/{user_id}")
+def subscription_status(user_id: int, db: Session = Depends(get_db)) -> dict:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    sub = (
+        db.query(Subscription)
+        .filter(Subscription.user_id == user.id, Subscription.active == True)
+        .order_by(Subscription.created_at.desc())
+        .first()
+    )
+
+    return {
+        "user_id": user.id,
+        "has_active_subscription": sub is not None,
+        "active_plan": sub.plan_name if sub else None,
+        "weekly_price": sub.weekly_price if sub else 0,
+        "weekly_coverage": sub.weekly_coverage if sub else 0,
+    }
 
 
 @router.get("/recommendation/{user_id}")
@@ -143,6 +165,37 @@ def activate_plan(payload: PlanChoiceRequest, db: Session = Depends(get_db)) -> 
         "payment_status": payment["status"],
         "payment_reference": payment["reference"],
         "provider": payment["provider"],
+    }
+
+
+@router.post("/cancel")
+def cancel_subscription(payload: SubscriptionCancelRequest, db: Session = Depends(get_db)) -> dict:
+    user = db.query(User).filter(User.id == payload.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    sub = (
+        db.query(Subscription)
+        .filter(Subscription.user_id == user.id, Subscription.active == True)
+        .order_by(Subscription.created_at.desc())
+        .first()
+    )
+    if not sub:
+        raise HTTPException(status_code=400, detail="No active subscription to cancel")
+
+    sub.active = False
+    db.add(
+        Notification(
+            user_id=user.id,
+            message=f"{sub.plan_name} subscription cancelled. You can reactivate anytime from Plans.",
+        )
+    )
+    db.commit()
+
+    return {
+        "user_id": user.id,
+        "cancelled_plan": sub.plan_name,
+        "status": "Cancelled",
     }
 
 

@@ -47,7 +47,17 @@ export default function LoginPage() {
         expected_role: expectedRole,
       });
       saveUser(data);
-      navigate(data.role === 'admin' ? '/admin' : '/subscribe');
+      if (data.role === 'admin') {
+        navigate('/admin');
+        return;
+      }
+
+      try {
+        const { data: subStatus } = await api.get(`/subscriptions/status/${data.user_id}`);
+        navigate(subStatus.has_active_subscription ? '/dashboard' : '/subscribe');
+      } catch {
+        navigate('/subscribe');
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Login failed');
     }
