@@ -17,7 +17,7 @@ function NavBar({ onGetStarted }) {
           <span className="h-3 w-3 rounded-sm bg-emerald-400" />
           <span className="h-3 w-3 rounded-sm bg-emerald-600" />
         </div>
-        <span className="font-heading text-lg font-bold text-white tracking-tight">GigShield</span>
+        <span className="font-heading text-lg font-bold text-white tracking-tight">InSureWell</span>
       </div>
       <div className="hidden sm:flex items-center gap-8 text-sm text-emerald-200/70 font-medium">
         <a href="#features" className="hover:text-white transition">Features</a>
@@ -160,7 +160,7 @@ export default function LoginPage() {
 
         <p className="mt-5 max-w-lg text-base text-emerald-200/70 leading-relaxed opacity-0 animate-fade-in-up delay-3"
           style={{ animationFillMode: 'forwards' }}>
-          GigShield pays you automatically when rain, floods, fire, or curfews stop you from working —
+          InSureWell pays you automatically when rain, floods, fire, or curfews stop you from working —
           before you even file a claim.
         </p>
 
@@ -380,7 +380,7 @@ export default function LoginPage() {
       {/* ── FOOTER ── */}
       <footer className="relative z-10 border-t py-8 text-center text-xs text-emerald-300/40"
         style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
-        <p>© 2026 GigShield · AI Parametric Insurance Platform · Built for India's gig workforce</p>
+        <p>© 2026 InSureWell · AI Parametric Insurance Platform · Built for India's gig workforce</p>
       </footer>
     </div>
   );

@@ -32,7 +32,7 @@ function TopNav() {
           <span className="h-2.5 w-2.5 rounded-sm bg-emerald-400" />
           <span className="h-2.5 w-2.5 rounded-sm bg-emerald-600" />
         </div>
-        <span className="font-heading text-base font-bold text-white tracking-tight">GigShield</span>
+        <span className="font-heading text-base font-bold text-white tracking-tight">InSureWell</span>
       </button>
 
       {/* Nav links — desktop */}
