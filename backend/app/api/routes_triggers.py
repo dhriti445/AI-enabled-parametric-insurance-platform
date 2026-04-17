@@ -41,8 +41,9 @@ def _create_auto_claims_for_event(
         fraud_score, flagged = fraud_detector.score(
             FraudSignal(
                 gps_mismatch=0,
-                duplicate_claims=1 if duplicate > 3 else 0,
+                duplicate_claims=1 if duplicate > 8 else 0,
                 odd_claim_hour=0,
+                weather_mismatch=0,
             )
         )
 

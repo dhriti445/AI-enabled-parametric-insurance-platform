@@ -3,35 +3,36 @@ import { useNavigate } from 'react-router-dom';
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Card, Layout } from '../components/Layout';
 import api from '../lib/api';
-import { clearUser } from '../lib/session';
+import { useTranslation } from '../lib/useTranslation';
 
 export default function AdminPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [data, setData] = useState(null);
   const [claimReviews, setClaimReviews] = useState([]);
   const [claimProvider, setClaimProvider] = useState({});
+  const [allNotifications, setAllNotifications] = useState([]);
   const [activeSection, setActiveSection] = useState('overview');
-  const [oneTimeSimulationAvailable, setOneTimeSimulationAvailable] = useState(
-    () => window.localStorage.getItem('admin_one_time_simulation_used') !== '1'
-  );
   const [simulationCity, setSimulationCity] = useState('mumbai');
   const [simulationResult, setSimulationResult] = useState(null);
   const [actionMessage, setActionMessage] = useState('');
 
   const loadAll = async () => {
-    const [overviewRes, claimsRes] = await Promise.all([
+    const [overviewRes, claimsRes, notifsRes] = await Promise.all([
       api.get('/admin/overview'),
       api.get('/admin/claim-reviews'),
+      api.get('/admin/notifications'),
     ]);
     setData(overviewRes.data);
     setClaimReviews(claimsRes.data.claims || []);
+    setAllNotifications(notifsRes.data.notifications || []);
   };
 
   useEffect(() => {
     loadAll();
   }, []);
 
-  if (!data) return <Layout title="Insurer Admin Dashboard" subtitle="Loading analytics..." />;
+  if (!data) return <Layout title={t('adminTitle')} subtitle={t('adminSubtitle')} />;
 
   const zoneData = Object.entries(data.risk_zone_classification).map(([zone, count]) => ({ zone, count }));
   const weeklyPredictions = data.weekly_claim_predictions || [];
@@ -59,29 +60,12 @@ export default function AdminPage() {
 
   const runSimulation = async () => {
     try {
-      const useForcedSimulation = oneTimeSimulationAvailable;
-      const endpoint = useForcedSimulation
-        ? `/triggers/monitor/auto/${simulationCity}?force=true`
-        : `/triggers/monitor/auto/${simulationCity}`;
-      const { data: result } = await api.post(endpoint);
+      const { data: result } = await api.post(`/triggers/monitor/auto/${simulationCity}?force=true`);
       setSimulationResult(result);
-      if (useForcedSimulation) {
-        window.localStorage.setItem('admin_one_time_simulation_used', '1');
-        setOneTimeSimulationAvailable(false);
-      }
-
       if (result.triggered) {
-        setActionMessage(
-          useForcedSimulation
-            ? `One-time simulated disruption completed: ${result.reason}. Next checks will use real-time APIs.`
-            : `Real-time check completed: ${result.reason}. ${result.affected_workers} workers affected.`
-        );
+        setActionMessage(`Simulated disruption triggered: ${result.reason}. ${result.affected_workers} workers auto-processed.`);
       } else {
-        setActionMessage(
-          useForcedSimulation
-            ? `One-time simulation completed with no disruption for ${simulationCity}. Next checks will use real-time APIs.`
-            : `Real-time check completed: No disruption detected for ${simulationCity}.`
-        );
+        setActionMessage(`Simulation ran for ${simulationCity} — no workers with active subscriptions found.`);
       }
       await loadAll();
     } catch (err) {
@@ -91,16 +75,16 @@ export default function AdminPage() {
 
   return (
     <Layout
-      title="Insurer Control Tower"
-      subtitle="Monitor platform risk, fraud signals, payouts, and AI-driven pricing optimization."
+      title={t('adminTitle')}
+      subtitle={t('adminSubtitle')}
       maxWidthClass="max-w-[1500px]"
     >
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <Metric label="Total Users" value={data.metrics.total_users} />
-        <Metric label="Active Subscriptions" value={data.metrics.active_subscriptions} />
-        <Metric label="Total Payouts" value={`Rs.${data.metrics.total_payouts}`} />
-        <Metric label="Loss Ratio" value={data.metrics.loss_ratio} />
-        <Metric label="Pending Claim Reviews" value={data.metrics.pending_claim_reviews} />
+        <Metric label={t('totalUsers')} value={data.metrics.total_users} />
+        <Metric label={t('activeSubscriptions')} value={data.metrics.active_subscriptions} />
+        <Metric label={t('totalPayouts')} value={`Rs.${Number(data.metrics.total_payouts).toFixed(2)}`} />
+        <Metric label={t('lossRatio')} value={data.metrics.loss_ratio} />
+        <Metric label={t('pendingReviews')} value={data.metrics.pending_claim_reviews} />
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
@@ -108,13 +92,13 @@ export default function AdminPage() {
           className={activeSection === 'overview' ? 'btn-primary' : 'btn-secondary'}
           onClick={() => setActiveSection('overview')}
         >
-          Overview
+          {t('overview')}
         </button>
         <button
           className={activeSection === 'simulation' ? 'btn-primary' : 'btn-secondary'}
           onClick={() => setActiveSection('simulation')}
         >
-          Simulation Lab
+          {t('simulationLab')}
         </button>
       </div>
 
@@ -136,7 +120,7 @@ export default function AdminPage() {
             </Card>
 
             <Card>
-              <p className="font-heading text-lg font-bold text-brand-900">Fraud Analytics</p>
+              <p className="font-heading text-lg font-bold text-brand-900">{t('fraudAnalytics')}</p>
               <ul className="mt-3 grid gap-2 text-sm text-slate-700">
                 {data.fraud_analytics.length ? data.fraud_analytics.map((item, idx) => (
                   <li key={idx} className="rounded-lg bg-red-50 p-3">
@@ -146,20 +130,30 @@ export default function AdminPage() {
               </ul>
             </Card>
 
-            <button
-              className="btn-secondary w-full"
-              onClick={() => {
-                clearUser();
-                navigate('/');
-              }}
-            >
-              Logout
-            </button>
+            <Card>
+              <p className="font-heading text-lg font-bold text-brand-900">All Platform Notifications</p>
+              <p className="mt-1 text-xs text-slate-500">Activity across all workers — newest first.</p>
+              <ul className="mt-3 grid gap-2 text-sm text-slate-700 max-h-72 overflow-y-auto pr-1">
+                {allNotifications.length ? allNotifications.map((n) => {
+                  const msg = n.message.toLowerCase();
+                  const icon = msg.includes('approved') ? '✅' : msg.includes('rejected') ? '❌' : msg.includes('payout') || msg.includes('activated') ? '💰' : msg.includes('flagged') || msg.includes('pending') ? '🕐' : 'ℹ️';
+                  return (
+                    <li key={n.id} className="rounded-lg bg-slate-50 border border-slate-200 p-2">
+                      <span className="mr-1">{icon}</span>
+                      <span className="font-semibold text-brand-800">{n.user_name}:</span>{' '}
+                      <span>{n.message}</span>
+                      <p className="mt-0.5 text-[10px] text-slate-400">{n.created_at ? new Date(n.created_at).toLocaleString() : ''}</p>
+                    </li>
+                  );
+                }) : <li className="rounded-lg bg-slate-100 p-2">No notifications yet.</li>}
+              </ul>
+            </Card>
+
           </aside>
 
           <main className="space-y-6">
             <Card>
-        <p className="font-heading text-lg font-bold text-brand-900">AI Subscription Optimization</p>
+        <p className="font-heading text-lg font-bold text-brand-900">{t('aiOptimization')}</p>
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
@@ -185,16 +179,18 @@ export default function AdminPage() {
             </Card>
 
             <Card>
-        <p className="font-heading text-lg font-bold text-brand-900">Next Week Disruption Claim Forecast</p>
-        <p className="mt-1 text-xs text-slate-500">Predictive analytics based on recent triggered events and city-level worker density.</p>
+        <p className="font-heading text-lg font-bold text-brand-900">{t('forecastTitle')}</p>
+        <p className="mt-1 text-xs text-slate-500">{t('forecastDesc')}</p>
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
               <tr className="text-left text-slate-500">
                 <th className="py-2">Region</th>
-                <th className="py-2">Predicted Claims</th>
+                <th className="py-2">Workers</th>
+                <th className="py-2">Total Claims</th>
+                <th className="py-2">Predicted Next Week</th>
                 <th className="py-2">Forecasted Disruptions</th>
-                <th className="py-2">Recent Triggered Events</th>
+                <th className="py-2">Recent Triggered</th>
                 <th className="py-2">Confidence</th>
               </tr>
             </thead>
@@ -202,6 +198,8 @@ export default function AdminPage() {
               {weeklyPredictions.length ? weeklyPredictions.map((row) => (
                 <tr key={row.region} className="border-t border-slate-100">
                   <td className="py-2">{row.region}</td>
+                  <td className="py-2">{row.workers}</td>
+                  <td className="py-2 font-semibold text-slate-700">{row.total_claims ?? 0}</td>
                   <td className="py-2 font-semibold text-brand-900">{row.predicted_claims_next_week}</td>
                   <td className="py-2">{row.forecast_disruptions_next_week}</td>
                   <td className="py-2">{row.recent_triggered_events}</td>
@@ -209,7 +207,7 @@ export default function AdminPage() {
                 </tr>
               )) : (
                 <tr>
-                  <td className="py-3 text-slate-500" colSpan={5}>No event history available yet for prediction.</td>
+                  <td className="py-3 text-slate-500" colSpan={7}>No event history available yet for prediction.</td>
                 </tr>
               )}
             </tbody>
@@ -218,8 +216,8 @@ export default function AdminPage() {
             </Card>
 
             <Card>
-        <p className="font-heading text-lg font-bold text-brand-900">Manual Claim Review Queue</p>
-        <p className="mt-1 text-xs text-slate-500">Fraud-risk image claims are queued here for insurer approval or rejection.</p>
+        <p className="font-heading text-lg font-bold text-brand-900">{t('claimReviewQueue')}</p>
+        <p className="mt-1 text-xs text-slate-500">{t('claimReviewDesc')}</p>
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
@@ -227,7 +225,7 @@ export default function AdminPage() {
                 <th className="py-2">Claim</th>
                 <th className="py-2">Worker</th>
                 <th className="py-2">Loss</th>
-                <th className="py-2">Fraud Score</th>
+                <th className="py-2">Condition Score</th>
                 <th className="py-2">Proof</th>
                 <th className="py-2">Gateway</th>
                 <th className="py-2">Action</th>
@@ -260,8 +258,8 @@ export default function AdminPage() {
                   </td>
                   <td className="py-2">
                     <div className="flex gap-2">
-                      <button className="btn-primary" onClick={() => reviewClaim(row.claim_id, 'approve')}>Approve</button>
-                      <button className="btn-secondary" onClick={() => reviewClaim(row.claim_id, 'reject')}>Reject</button>
+                      <button className="btn-primary" onClick={() => reviewClaim(row.claim_id, 'approve')}>{t('approve')}</button>
+                      <button className="btn-secondary" onClick={() => reviewClaim(row.claim_id, 'reject')}>{t('reject')}</button>
                     </div>
                   </td>
                 </tr>
@@ -282,10 +280,8 @@ export default function AdminPage() {
         <div className="mt-6 grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
           <aside className="space-y-4 xl:sticky xl:top-6 xl:self-start">
             <Card>
-              <p className="text-xs uppercase tracking-wide text-slate-500">Simulation Control</p>
-              <p className="mt-1 text-xs text-slate-500">
-                Mode: {oneTimeSimulationAvailable ? 'One-time simulation (next run)' : 'Real-time APIs'}
-              </p>
+              <p className="text-xs uppercase tracking-wide text-slate-500">{t('simulationControl')}</p>
+              <p className="mt-1 text-xs text-slate-500">{t('simulationMode')}</p>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <select className="input w-full" value={simulationCity} onChange={(e) => setSimulationCity(e.target.value)}>
                   <option value="mumbai">Mumbai</option>
@@ -295,32 +291,21 @@ export default function AdminPage() {
                   <option value="bengaluru">Bengaluru</option>
                 </select>
                 <button className="btn-primary w-full" onClick={runSimulation}>
-                  {oneTimeSimulationAvailable ? 'Trigger Fake Rainstorm (One-Time)' : 'Run Real-Time Trigger Check'}
+                  {t('triggerSimulation')}
                 </button>
               </div>
             </Card>
 
             <Card>
-              <p className="font-heading text-lg font-bold text-brand-900">What This Does</p>
-              <p className="mt-2 text-sm text-slate-600">
-                Simulates an external city disruption, evaluates trigger signals, and auto-generates eligible worker claims with payout simulation.
-              </p>
+              <p className="font-heading text-lg font-bold text-brand-900">{t('whatThisDoes')}</p>
+              <p className="mt-2 text-sm text-slate-600">{t('whatThisDoesDesc')}</p>
             </Card>
 
-            <button
-              className="btn-secondary w-full"
-              onClick={() => {
-                clearUser();
-                navigate('/');
-              }}
-            >
-              Logout
-            </button>
           </aside>
 
           <main className="space-y-6">
             <Card>
-              <p className="font-heading text-lg font-bold text-brand-900">External Disruption Simulation Output</p>
+              <p className="font-heading text-lg font-bold text-brand-900">{t('simulationOutput')}</p>
               {simulationResult ? (
                 <div className="mt-3 space-y-2 text-sm text-slate-700">
                   <p><strong>Triggered:</strong> {String(simulationResult.triggered)}</p>

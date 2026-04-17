@@ -55,6 +55,9 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthRes
         location=user.location,
         risk_score=user.risk_score,
         risk_tier=user.risk_tier,
+        email=user.email,
+        phone=user.phone,
+        platform=user.platform,
     )
 
 
@@ -84,4 +87,36 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
         location=user.location,
         risk_score=user.risk_score,
         risk_tier=user.risk_tier,
+        email=user.email,
+        phone=user.phone,
+        platform=user.platform,
     )
+
+
+from pydantic import BaseModel
+
+class ProfileUpdateRequest(BaseModel):
+    name: str
+
+@router.patch("/profile/{user_id}")
+def update_profile(user_id: int, payload: ProfileUpdateRequest, db: Session = Depends(get_db)) -> dict:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+    user.name = name
+    db.commit()
+    db.refresh(user)
+    return {"user_id": user.id, "name": user.name}
+
+
+@router.delete("/profile/{user_id}")
+def delete_account(user_id: int, db: Session = Depends(get_db)) -> dict:
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    db.delete(user)
+    db.commit()
+    return {"status": "deleted", "user_id": user_id}

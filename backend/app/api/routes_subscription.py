@@ -239,18 +239,31 @@ def dashboard(user_id: int, db: Session = Depends(get_db)) -> dict:
         goal.current_progress = min(goal.monthly_target, goal.current_progress + (claims_count * 500))
         db.commit()
 
-    extra_days = suggest_extra_days(
-        weather_risk=[0.5, 0.2, 0.7, 0.3, 0.1, 0.2, 0.4],
-        demand_trend=[0.6, 0.5, 0.4, 0.7, 0.8, 0.9, 0.7],
-    )
+    extra_days = suggest_extra_days(location=user.location)
 
     notifications = (
         db.query(Notification)
         .filter(Notification.user_id == user.id)
         .order_by(Notification.created_at.desc())
-        .limit(5)
+        .limit(8)
         .all()
     )
+
+    def _format_notification(msg: str) -> dict:
+        msg_lower = msg.lower()
+        if "approved" in msg_lower:
+            icon, color = "✅", "emerald"
+        elif "rejected" in msg_lower:
+            icon, color = "❌", "red"
+        elif "submitted" in msg_lower or "pending" in msg_lower or "flagged" in msg_lower:
+            icon, color = "🕐", "amber"
+        elif "activated" in msg_lower or "payout" in msg_lower:
+            icon, color = "💰", "brand"
+        elif "cancelled" in msg_lower:
+            icon, color = "🚫", "slate"
+        else:
+            icon, color = "ℹ️", "slate"
+        return {"message": msg, "icon": icon, "color": color}
 
     return {
         "welcome": f"Welcome, {user.name}",
@@ -270,5 +283,6 @@ def dashboard(user_id: int, db: Session = Depends(get_db)) -> dict:
         },
         "work_suggestion": f"Best days to work extra this week: {', '.join(extra_days)}",
         "latest_notifications": [n.message for n in notifications],
+        "notifications_structured": [_format_notification(n.message) for n in notifications],
         "generated_at": datetime.utcnow().isoformat(),
     }

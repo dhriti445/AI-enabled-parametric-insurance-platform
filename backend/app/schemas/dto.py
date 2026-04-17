@@ -25,6 +25,9 @@ class AuthResponse(BaseModel):
     location: str
     risk_score: float
     risk_tier: str
+    email: str = ""
+    phone: str = ""
+    platform: str = ""
 
 
 class PlanChoiceRequest(BaseModel):

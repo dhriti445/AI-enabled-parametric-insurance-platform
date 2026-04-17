@@ -12,6 +12,31 @@ from app.services.payments import simulate_payment
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
+@router.get("/notifications")
+def all_notifications(db: Session = Depends(get_db)) -> dict:
+    """All platform notifications for insurer view — all users, newest first."""
+    rows = (
+        db.query(Notification, User)
+        .join(User, User.id == Notification.user_id)
+        .order_by(Notification.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    return {
+        "notifications": [
+            {
+                "id": n.id,
+                "user_name": u.name,
+                "user_id": u.id,
+                "message": n.message,
+                "read": n.read,
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+            }
+            for n, u in rows
+        ]
+    }
+
+
 @router.get("/claim-reviews")
 def list_claim_reviews(db: Session = Depends(get_db)) -> dict:
     rows = (
@@ -163,11 +188,19 @@ def overview(db: Session = Depends(get_db)) -> dict:
         triggered_events = (
             db.query(DisruptionEvent)
             .filter(
-                DisruptionEvent.location == city_row.location,
+                func.lower(DisruptionEvent.location) == city_row.location.lower(),
                 DisruptionEvent.created_at >= prediction_window_start,
                 DisruptionEvent.triggered == True,
             )
             .all()
+        )
+
+        # Count all claims for workers in this city (auto + manual)
+        total_claims_in_city = (
+            db.query(func.count(Claim.id))
+            .join(User, User.id == Claim.user_id)
+            .filter(func.lower(User.location) == city_row.location.lower())
+            .scalar() or 0
         )
 
         triggered_count = len(triggered_events)
@@ -176,18 +209,29 @@ def overview(db: Session = Depends(get_db)) -> dict:
             if triggered_count
             else 0.0
         )
+
+        # Forecast: blend triggered events + existing claim density
+        claim_rate = min(1.0, total_claims_in_city / max(city_row.workers, 1))
         forecast_disruptions = round((triggered_count / 4.0) + (rainfall_avg / 120.0), 2)
-        expected_claims = int(round(min(city_row.workers, city_row.workers * min(1.0, forecast_disruptions / 3.0))))
+        # Predicted claims = workers × blended rate (triggered history + claim density)
+        blended_rate = min(1.0, (forecast_disruptions / 3.0) * 0.6 + claim_rate * 0.4)
+        expected_claims = max(
+            int(round(city_row.workers * blended_rate)),
+            1 if (triggered_count > 0 or total_claims_in_city > 0) else 0,
+        )
+
+        confidence = "High" if triggered_count >= 3 else ("Medium" if triggered_count >= 1 or total_claims_in_city >= 2 else "Low")
 
         weekly_predictions.append(
             {
                 "region": city_row.location,
                 "workers": int(city_row.workers),
+                "total_claims": int(total_claims_in_city),
                 "recent_triggered_events": triggered_count,
                 "avg_trigger_rainfall_mm": round(rainfall_avg, 2),
                 "forecast_disruptions_next_week": forecast_disruptions,
                 "predicted_claims_next_week": expected_claims,
-                "confidence": "Medium" if triggered_count >= 2 else "Low",
+                "confidence": confidence,
             }
         )
 

@@ -11,7 +11,7 @@ from app.core.database import get_db
 from app.models.entities import Claim, DisruptionEvent, Notification, Payout, Subscription, User
 from app.schemas.dto import ManualClaimRequest
 from app.services.fraud_detector import FraudSignal, fraud_detector
-from app.services.image_verifier import verify_claim_image
+from app.services.image_verifier import verify_claim_image, verify_claim_image_detailed
 from app.services.payments import simulate_payment
 from app.services.trigger_automation import CITY_COORDS, fetch_disruption_inputs
 
@@ -115,6 +115,7 @@ def manual_claim(
     user_id: int = Form(...),
     estimated_income_loss: float = Form(...),
     proof_file: UploadFile = File(...),
+    condition: str = Form(default="unknown"),
     worker_lat: float | None = Form(default=None),
     worker_lon: float | None = Form(default=None),
     db: Session = Depends(get_db),
@@ -146,7 +147,36 @@ def manual_claim(
     if not active_sub:
         raise HTTPException(status_code=400, detail="No active subscription")
 
-    image_ok, image_msg, confidence = verify_claim_image(file_path)
+    # --- Plan-based claim limit enforcement ---
+    PLAN_COVERAGE_LIMITS = {"Basic": 400.0, "Standard": 700.0, "Premium": 1000.0}
+    plan_limit = PLAN_COVERAGE_LIMITS.get(active_sub.plan_name, active_sub.weekly_coverage)
+    if estimated_income_loss > plan_limit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Claim amount Rs.{estimated_income_loss} exceeds your {active_sub.plan_name} plan limit of Rs.{plan_limit}"
+        )
+
+    # --- Plan-based condition restrictions ---
+    PLAN_ALLOWED_CONDITIONS = {
+        "Basic":    {"storm", "rain", "flood", "other", "unknown"},
+        "Standard": {"storm", "rain", "flood", "smoke", "drought", "heatwave", "other", "unknown"},
+        "Premium":  {"storm", "rain", "flood", "fire", "smoke", "drought", "heatwave", "curfew", "other", "unknown"},
+    }
+    allowed = PLAN_ALLOWED_CONDITIONS.get(active_sub.plan_name, set())
+    stated_condition_raw = condition.lower().strip() if condition else "unknown"
+    if stated_condition_raw not in {"unknown", "other", ""} and stated_condition_raw not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Condition '{stated_condition_raw}' is not covered by your {active_sub.plan_name} plan. Upgrade to access this coverage."
+        )
+
+    # --- Image verification (pixel-level model) ---
+    img_result = verify_claim_image_detailed(file_path)
+    image_ok = img_result.accepted
+    image_msg = img_result.message
+    confidence = img_result.confidence
+    disaster_type = img_result.disaster_type
+
     duplicate_claims = db.query(Claim).filter(Claim.user_id == user.id).count()
 
     city_key = user.location.lower().strip()
@@ -170,6 +200,8 @@ def manual_claim(
 
     live_inputs = fetch_disruption_inputs(user.location)
     live_rainfall = float(live_inputs.get("rainfall_mm", 0.0))
+    live_aqi = int(live_inputs.get("aqi", 50))
+    live_temperature = float(live_inputs.get("temperature_c", 30.0))
     historical_rain = _historical_rainfall(db, user.location)
 
     recent_triggered_events = (
@@ -184,31 +216,85 @@ def manual_claim(
         .count()
     )
 
-    # API-only weather consistency signal: no worker rainfall input required.
-    weather_mismatch = 1 if (live_rainfall < 8 and historical_rain < 20 and recent_triggered_events == 0) else 0
+    # Weather mismatch: only flag if live rainfall is very low AND no recent events AND historical is also dry
+    weather_mismatch = 1 if (live_rainfall < 2 and historical_rain < 5 and recent_triggered_events == 0) else 0
 
-    odd_hour = 1 if datetime.utcnow().hour in {0, 1, 2, 3, 4} else 0
-    fraud_score, flagged, fraud_reasons = fraud_detector.analyze(
+    odd_hour = 1 if datetime.utcnow().hour in {20, 21, 22, 23, 0, 1} else 0
+
+    # Infer disaster context: worker-stated condition takes priority over image/weather inference
+    VALID_CONDITIONS = {"storm", "rain", "fire", "flood", "smoke", "drought", "heatwave", "curfew", "other", "unknown"}
+    stated_condition = condition.lower().strip() if condition else "unknown"
+    if stated_condition not in VALID_CONDITIONS:
+        stated_condition = "unknown"
+
+    # Map stated condition to disaster context understood by fraud model
+    CONDITION_MAP = {
+        "storm": "rain", "rain": "rain", "flood": "flood",
+        "fire": "fire", "smoke": "smoke", "drought": "unknown",
+        "heatwave": "unknown", "curfew": "unknown", "other": "unknown", "unknown": "unknown",
+    }
+
+    if stated_condition not in {"unknown", "other"} and disaster_type == "unknown":
+        # Worker stated a condition but image was inconclusive — trust the worker
+        disaster_context = CONDITION_MAP[stated_condition]
+    elif disaster_type in {"rain", "flood", "fire", "smoke"}:
+        disaster_context = disaster_type
+    elif live_rainfall >= 30:
+        disaster_context = "rain"
+    elif live_aqi >= 200:
+        disaster_context = "fire"
+    else:
+        disaster_context = CONDITION_MAP.get(stated_condition, "unknown")
+
+    claim_amount_ratio = estimated_income_loss / (active_sub.weekly_coverage + 1e-6)
+
+    fraud_result = fraud_detector.analyze_detailed(
         FraudSignal(
             gps_mismatch=gps_mismatch,
             duplicate_claims=1 if duplicate_claims > 2 else 0,
             odd_claim_hour=odd_hour,
             weather_mismatch=weather_mismatch,
+            disaster_context=disaster_context,
+            image_disaster_type=disaster_type,
+            image_confidence=confidence,
+            live_rainfall_mm=live_rainfall,
+            live_aqi=live_aqi,
+            live_temperature_c=live_temperature,
+            recent_triggered_events=recent_triggered_events,
+            historical_rain_mm=historical_rain,
+            claim_amount_ratio=claim_amount_ratio,
         )
     )
+    fraud_score = fraud_result.fraud_score
+    flagged = fraud_result.flagged
+    fraud_reasons = fraud_result.reasons
 
-    status = "Pending Review"
+    # --- Auto-approve logic ---
+    # If CLIP confidence >= 90% AND image disaster matches stated condition AND no fraud flags → auto-approve + pay
+    HIGH_CONFIDENCE_THRESHOLD = 0.90
+    image_clearly_matches = (
+        confidence >= HIGH_CONFIDENCE_THRESHOLD
+        and disaster_type in {"rain", "flood", "fire", "smoke"}
+        and disaster_type != "clear"
+        and not flagged
+        and image_ok
+    )
+
     if not image_ok:
         status = "Rejected"
+    elif image_clearly_matches:
+        status = "Approved"
     elif flagged:
         status = "Flagged"
+    else:
+        status = "Pending Review"
 
     approved_amount = min(estimated_income_loss, active_sub.weekly_coverage)
     claim = Claim(
         user_id=user.id,
         estimated_income_loss=approved_amount,
         status=status,
-        fraud_score=max(fraud_score, 1 - confidence),
+        fraud_score=fraud_score,
         manual_proof_url=file_path,
         created_at=datetime.utcnow(),
     )
@@ -216,31 +302,59 @@ def manual_claim(
     db.flush()
 
     payout_info = None
-    if status in {"Pending Review", "Flagged"}:
-        db.add(
-            Notification(
-                user_id=user.id,
-                message=(
-                    f"Claim #{claim.id} submitted with status '{status}'. "
-                    "Insurer review is in progress."
-                ),
-            )
+    if status == "Approved":
+        # Auto-pay immediately
+        payout_gateway = "UPI" if user.platform.lower() in {"swiggy", "zomato", "zepto", "blinkit"} else "Razorpay"
+        payment = simulate_payment(payout_gateway, approved_amount)
+        payout = Payout(
+            user_id=user.id,
+            claim_id=claim.id,
+            amount=approved_amount,
+            payment_gateway=payment["provider"],
         )
+        db.add(payout)
+        payout_info = {
+            "provider": payment["provider"],
+            "reference": payment["reference"],
+            "amount": approved_amount,
+            "settlement_eta": payment["settlement_eta"],
+        }
+        db.add(Notification(
+            user_id=user.id,
+            message=(
+                f"Claim #{claim.id} auto-approved (CLIP {confidence*100:.0f}% confidence: {disaster_type}). "
+                f"Payout of Rs.{approved_amount} via {payment['provider']} ({payment['reference']})."
+            ),
+        ))
+    elif status in {"Pending Review", "Flagged"}:
+        db.add(Notification(
+            user_id=user.id,
+            message=(
+                f"Claim #{claim.id} submitted with status '{status}'. "
+                "Insurer review is in progress."
+            ),
+        ))
     elif status == "Rejected":
-        db.add(
-            Notification(
-                user_id=user.id,
-                message=f"Claim #{claim.id} was rejected by AI image verification.",
-            )
-        )
+        db.add(Notification(
+            user_id=user.id,
+            message=f"Claim #{claim.id} was rejected by AI image verification.",
+        ))
 
     db.commit()
 
     return {
         "claim_id": claim.id,
         "claim_status": status,
-        "image_verification": {"accepted": image_ok, "message": image_msg, "confidence": confidence},
-        "fraud_score": claim.fraud_score,
+        "stated_condition": stated_condition,
+        "image_verification": {
+            "accepted": image_ok,
+            "message": image_msg,
+            "confidence": confidence,
+            "disaster_type": disaster_type,
+            "pixel_signals": img_result.signals,
+        },
+        "condition_verification_score": claim.fraud_score,
+        "fraud_score": claim.fraud_score,  # kept for backward compat
         "fraud_reasons": fraud_reasons,
         "fraud_signals": {
             "gps_distance_km": round(gps_distance_km, 2) if gps_distance_km is not None else None,
@@ -248,8 +362,12 @@ def manual_claim(
             "worker_lat": worker_lat,
             "worker_lon": worker_lon,
             "live_rainfall_mm": live_rainfall,
+            "live_aqi": live_aqi,
+            "live_temperature_c": live_temperature,
             "historical_rainfall_mm": round(historical_rain, 2),
             "recent_triggered_events": recent_triggered_events,
+            "disaster_context": disaster_context,
+            "disaster_signals": fraud_result.disaster_signals,
         },
         "payout": payout_info,
     }
